@@ -1,16 +1,22 @@
 import { Router } from 'express';
-import { db } from '../db.js';
+import { db, mockData } from '../db.js';
 
 const router = Router();
 
 // Ruta para obtener todos los maestros
 router.get('/', async (req, res) => {
   try {
-    const [rows] = await db.query('SELECT * FROM maestros');
-    res.json(rows);
+    if (db) {
+      const [rows] = await db.query('SELECT * FROM maestros');
+      res.json(rows);
+    } else {
+      // Usar datos de ejemplo si no hay conexión a la base de datos
+      res.json(mockData.maestros);
+    }
   } catch (error) {
     console.error('❌ Error al obtener maestros:', error);
-    res.status(500).json({ message: 'Error al obtener los maestros' });
+    // En caso de error, devolver datos de ejemplo
+    res.json(mockData.maestros);
   }
 });
 
