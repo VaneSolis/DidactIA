@@ -25,27 +25,7 @@ export const mockData = {
   ]
 };
 
-let db = null;
+// Por ahora, siempre usar datos de ejemplo
+export const db = null;
 
-// Función para inicializar la conexión a la base de datos
-async function initDB() {
-  try {
-    db = await mysql.createConnection({
-      host: process.env.DB_HOST || 'localhost',
-      port: process.env.DB_PORT || 3306,  
-      user: process.env.DB_USER || 'root',
-      password: process.env.DB_PASS || '',
-      database: process.env.DB_NAME || 'didactia'
-    });
-    console.log('✅ Conectado a MySQL');
-  } catch (error) {
-    console.log('⚠️ No se pudo conectar a MySQL, usando datos de ejemplo');
-    console.log('💡 Para usar la base de datos real, ejecuta: mysql -u root -p < ../database/setup.sql');
-    db = null;
-  }
-}
-
-// Inicializar la conexión
-initDB();
-
-export { db };
+console.log('📋 Usando datos de ejemplo (modo demo)');
