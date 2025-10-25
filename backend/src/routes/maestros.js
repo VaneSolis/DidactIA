@@ -11,11 +11,13 @@ router.get('/', async (req, res) => {
       res.json(rows);
     } else {
       // Usar datos de ejemplo si no hay conexión a la base de datos
+      console.log('📋 Usando datos de ejemplo para maestros');
       res.json(mockData.maestros);
     }
   } catch (error) {
     console.error('❌ Error al obtener maestros:', error);
     // En caso de error, devolver datos de ejemplo
+    console.log('📋 Usando datos de ejemplo por error');
     res.json(mockData.maestros);
   }
 });
