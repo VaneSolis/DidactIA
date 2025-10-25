@@ -1,0 +1,173 @@
+{
+	"info": {
+		"_postman_id": "didactia-api-collection",
+		"name": "DidactIA API",
+		"description": "Colección de endpoints para la API de DidactIA - Sistema de gestión educativa",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Maestros",
+			"item": [
+				{
+					"name": "Obtener todos los maestros",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/maestros",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"maestros"
+							]
+						},
+						"description": "Obtiene la lista de todos los maestros registrados en el sistema"
+					},
+					"response": []
+				}
+			],
+			"description": "Endpoints relacionados con la gestión de maestros"
+		},
+		{
+			"name": "Clases",
+			"item": [
+				{
+					"name": "Obtener todas las clases",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/clases",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"clases"
+							]
+						},
+						"description": "Obtiene la lista de todas las clases registradas en el sistema"
+					},
+					"response": []
+				},
+				{
+					"name": "Crear nueva clase",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"id_maestro\": 1,\n  \"nombre\": \"Matemáticas Básicas\",\n  \"grado\": \"5to\",\n  \"materia\": \"Matemáticas\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/clases",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"clases"
+							]
+						},
+						"description": "Crea una nueva clase en el sistema"
+					},
+					"response": []
+				}
+			],
+			"description": "Endpoints relacionados con la gestión de clases"
+		},
+		{
+			"name": "Actividades",
+			"item": [
+				{
+					"name": "Obtener todas las actividades",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/actividades",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"actividades"
+							]
+						},
+						"description": "Obtiene la lista de todas las actividades registradas en el sistema"
+					},
+					"response": []
+				},
+				{
+					"name": "Crear nueva actividad",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"id_clase\": 1,\n  \"titulo\": \"Ejercicios de Suma\",\n  \"descripcion\": \"Resolver problemas de suma básica\",\n  \"fecha\": \"2024-01-15\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/actividades",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"actividades"
+							]
+						},
+						"description": "Crea una nueva actividad en el sistema"
+					},
+					"response": []
+				}
+			],
+			"description": "Endpoints relacionados con la gestión de actividades"
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:4000",
+			"type": "string"
+		}
+	]
+}
