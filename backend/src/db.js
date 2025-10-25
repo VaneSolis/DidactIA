@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-// Datos de ejemplo para testing sin base de datos
+// Datos de ejemplo para fallback
 export const mockData = {
   maestros: [
     { id: 1, nombre: 'Prof. María García', email: 'maria.garcia@didactia.com', telefono: '555-0101', especialidad: 'Matemáticas' },
@@ -25,7 +25,32 @@ export const mockData = {
   ]
 };
 
-// Por ahora, siempre usar datos de ejemplo
-export const db = null;
+let db = null;
 
-console.log('📋 Usando datos de ejemplo (modo demo)');
+// Función para crear la conexión a MySQL
+async function createConnection() {
+  try {
+    const connection = await mysql.createConnection({
+      host: process.env.DB_HOST || 'localhost',
+      port: process.env.DB_PORT || 3306,
+      user: process.env.DB_USER || 'root',
+      password: process.env.DB_PASS || '',
+      database: process.env.DB_NAME || 'didactia'
+    });
+    
+    // Probar la conexión
+    await connection.ping();
+    console.log('✅ Conectado a MySQL exitosamente');
+    return connection;
+  } catch (error) {
+    console.log('⚠️ No se pudo conectar a MySQL:', error.message);
+    console.log('💡 Usando datos de ejemplo (modo demo)');
+    console.log('📋 Para conectar a MySQL, sigue las instrucciones en docs/INSTALL_MYSQL.md');
+    return null;
+  }
+}
+
+// Crear la conexión
+db = await createConnection();
+
+export { db };
