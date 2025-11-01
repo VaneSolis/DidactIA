@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react'
 import ListaClases from '../components/ListaClases'
 import FormularioClase from '../components/FormularioClase'
+import FormularioMaestro from '../components/FormularioMaestro'
 import DetalleClase from '../components/DetalleClase'
 import api from '../api'
 
 function Home() {
   const [selectedClase, setSelectedClase] = useState(null)
-  const [showForm, setShowForm] = useState(false)
+  const [showFormClase, setShowFormClase] = useState(false)
+  const [showFormMaestro, setShowFormMaestro] = useState(false)
   const [claseToEdit, setClaseToEdit] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const [backendStatus, setBackendStatus] = useState('checking')
@@ -31,19 +33,32 @@ function Home() {
 
   const handleSelectClase = (clase) => {
     setSelectedClase(clase)
-    setShowForm(false)
+    setShowFormClase(false)
   }
 
   const handleNuevaClase = () => {
     setSelectedClase(null)
     setClaseToEdit(null)
-    setShowForm(true)
+    setShowFormClase(true)
+    setShowFormMaestro(false)
   }
 
-  const handleSaveSuccess = () => {
-    setShowForm(false)
+  const handleNuevoMaestro = () => {
+    setShowFormMaestro(true)
+    setShowFormClase(false)
+    setSelectedClase(null)
+  }
+
+  const handleSaveClaseSuccess = () => {
+    setShowFormClase(false)
     setClaseToEdit(null)
     // Forzar actualización de la lista incrementando la key
+    setRefreshKey((prev) => prev + 1)
+  }
+
+  const handleSaveMaestroSuccess = () => {
+    setShowFormMaestro(false)
+    // Forzar actualización para que el formulario de clase pueda cargar los nuevos maestros
     setRefreshKey((prev) => prev + 1)
   }
 
@@ -51,9 +66,16 @@ function Home() {
     setSelectedClase(null)
   }
 
+  const handleVerClases = () => {
+    setSelectedClase(null)
+    setShowFormClase(false)
+    setShowFormMaestro(false)
+    setRefreshKey((prev) => prev + 1)
+  }
+
   return (
-    <div>
-      <h1>DidactIA - Gestión de Clases</h1>
+    <div style={{ padding: '20px', maxWidth: '1400px', margin: '0 auto' }}>
+      <h1 style={{ marginBottom: '20px', color: '#333' }}>DidactIA - Gestión de Clases</h1>
       
       {/* Indicador de estado del backend */}
       <div style={{ 
@@ -68,31 +90,103 @@ function Home() {
         {backendStatus === 'error' && '❌ Error: No se pudo conectar al backend. Asegúrate de que esté corriendo en ' + import.meta.env.VITE_API_URL}
       </div>
       
-      <div>
-        <button onClick={handleNuevaClase}>Nueva Clase</button>
+      {/* Botones de acción */}
+      <div style={{ 
+        display: 'flex', 
+        gap: '10px', 
+        marginBottom: '20px',
+        flexWrap: 'wrap'
+      }}>
+        <button 
+          onClick={handleVerClases}
+          style={{
+            padding: '10px 20px',
+            backgroundColor: '#28a745',
+            color: 'white',
+            border: 'none',
+            borderRadius: '5px',
+            cursor: 'pointer',
+            fontSize: '16px',
+            fontWeight: 'bold'
+          }}
+        >
+          📋 Ver Clases
+        </button>
+        <button 
+          onClick={handleNuevaClase}
+          style={{
+            padding: '10px 20px',
+            backgroundColor: '#007bff',
+            color: 'white',
+            border: 'none',
+            borderRadius: '5px',
+            cursor: 'pointer',
+            fontSize: '16px',
+            fontWeight: 'bold'
+          }}
+        >
+          ➕ Nueva Clase
+        </button>
+        <button 
+          onClick={handleNuevoMaestro}
+          style={{
+            padding: '10px 20px',
+            backgroundColor: '#17a2b8',
+            color: 'white',
+            border: 'none',
+            borderRadius: '5px',
+            cursor: 'pointer',
+            fontSize: '16px',
+            fontWeight: 'bold'
+          }}
+        >
+          👤 Agregar Maestro
+        </button>
       </div>
 
-      {showForm && (
-        <div>
-          <FormularioClase
-            clase={claseToEdit}
-            onSave={handleSaveSuccess}
-            onCancel={() => setShowForm(false)}
+      {/* Formulario de Maestro */}
+      {showFormMaestro && (
+        <div style={{ marginBottom: '30px' }}>
+          <FormularioMaestro
+            onSave={handleSaveMaestroSuccess}
+            onCancel={() => setShowFormMaestro(false)}
           />
         </div>
       )}
 
-      {selectedClase && !showForm && (
-        <div>
+      {/* Formulario de Clase */}
+      {showFormClase && (
+        <div style={{ marginBottom: '30px' }}>
+          <FormularioClase
+            clase={claseToEdit}
+            onSave={handleSaveClaseSuccess}
+            onCancel={() => setShowFormClase(false)}
+            refreshTrigger={refreshKey}
+          />
+        </div>
+      )}
+
+      {/* Detalle de Clase */}
+      {selectedClase && !showFormClase && (
+        <div style={{ 
+          marginBottom: '30px',
+          border: '1px solid #ddd',
+          borderRadius: '8px',
+          padding: '20px',
+          backgroundColor: '#f9f9f9'
+        }}>
           <DetalleClase clase={selectedClase} onClose={handleCloseDetail} />
         </div>
       )}
 
-      {!showForm && !selectedClase && (
-        <div>
-          <ListaClases key={refreshKey} onSelectClase={handleSelectClase} />
-        </div>
-      )}
+      {/* Lista de Clases - Siempre visible */}
+      <div style={{ marginTop: '30px' }}>
+        <ListaClases 
+          key={refreshKey} 
+          onSelectClase={handleSelectClase}
+          refreshTrigger={refreshKey}
+        />
+      </div>
     </div>
   )
 }
