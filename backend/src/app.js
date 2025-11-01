@@ -9,9 +9,6 @@ import iaRoutes from './routes/ia.js';
 
 const app = express();
 
-// Ruta para generar actividades
-app.use('/actividades', iaRoutes);
-
 // Configuración de CORS
 // Permite solicitudes desde el frontend (normalmente en puerto 5173 para Vite)
 const corsOptions = {
@@ -22,7 +19,21 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.use(express.json());
+
+// Middleware para parsear JSON (debe estar antes de las rutas)
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true }));
+
+// Middleware de depuración (solo para desarrollo)
+if (process.env.NODE_ENV !== 'production') {
+  app.use((req, res, next) => {
+    if (req.method === 'POST' || req.method === 'PUT') {
+      console.log('📨 Body recibido:', req.body);
+      console.log('📋 Content-Type:', req.get('Content-Type'));
+    }
+    next();
+  });
+}
 
 // Ruta de prueba para verificar CORS y conexión
 app.get('/health', (req, res) => {
@@ -33,8 +44,15 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Rutas principales
 app.use('/maestros', maestrosRoutes);
 app.use('/clases', clasesRoutes);
+
+// IMPORTANTE: Las rutas específicas deben ir ANTES de las generales
+// Ruta específica para generar actividades con IA
+app.use('/actividades', iaRoutes);
+
+// Rutas generales de actividades (GET /actividades, POST /actividades)
 app.use('/actividades', actividadesRoutes);
 
 app.listen(process.env.PORT || 4000, () => {
