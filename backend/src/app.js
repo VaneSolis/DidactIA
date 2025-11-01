@@ -5,8 +5,12 @@ import { db } from './db.js';
 import maestrosRoutes from './routes/maestros.js';
 import clasesRoutes from './routes/clases.js';
 import actividadesRoutes from './routes/actividades.js';
+import iaRoutes from './routes/ia.js';
 
 const app = express();
+
+// Ruta para generar actividades
+app.use('/actividades', iaRoutes);
 
 // Configuración de CORS
 // Permite solicitudes desde el frontend (normalmente en puerto 5173 para Vite)
