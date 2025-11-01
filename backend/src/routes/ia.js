@@ -80,8 +80,9 @@ Responde en formato JSON como una lista llamada "actividades".
     // 🚀 Llamada a la API de Hugging Face
     // Nota: Muchos modelos requieren que los aceptes primero en huggingface.co
     // Visita: https://huggingface.co/models y busca el modelo para aceptarlo
-    // Modelos actualizados con las URLs correctas:
+    // Modelos que deberían estar disponibles (en orden de prioridad):
     const modelos = [
+      "https://api-inference.huggingface.co/models/facebook/opt-125m",
       "https://api-inference.huggingface.co/models/distilgpt2",
       "https://api-inference.huggingface.co/models/openai-community/gpt2",
       "https://api-inference.huggingface.co/models/google/flan-t5-base"
@@ -115,7 +116,18 @@ Responde en formato JSON como una lista llamada "actividades".
         } else {
           const errorText = await response.text();
           console.log(`⚠️ Modelo ${modelUrl} falló: ${response.status} - ${errorText}`);
-          lastError = { status: response.status, message: errorText, model: modelUrl };
+          
+          // Extraer nombre del modelo de la URL
+          const modelName = modelUrl.split('/models/')[1];
+          lastError = { 
+            status: response.status, 
+            message: errorText, 
+            model: modelName,
+            url: modelUrl,
+            solucion: response.status === 404 
+              ? `Visita https://huggingface.co/${modelName} y haz clic en "Agree and access repository" para aceptar el modelo`
+              : 'Verifica que tu token tenga permisos de inferencia en Hugging Face Settings'
+          };
         }
       } catch (fetchError) {
         console.log(`⚠️ Error al llamar ${modelUrl}:`, fetchError.message);
@@ -127,11 +139,24 @@ Responde en formato JSON como una lista llamada "actividades".
     if (!response || !response.ok) {
       console.log('❌ Todos los modelos de IA fallaron, usando generación simple');
       const actividades = generarActividadesSimples(materia, grado, objetivo);
+      
+      // Crear mensaje más útil con instrucciones
+      let mensaje = 'La IA no está disponible, se generaron actividades básicas.';
+      if (lastError?.solucion) {
+        mensaje += ` ${lastError.solucion}`;
+      }
+      
       return res.json({ 
         actividades, 
         modo: 'simple',
-        nota: 'La IA no está disponible, se generaron actividades básicas',
-        error_ia: lastError
+        nota: mensaje,
+        error_ia: lastError,
+        instrucciones: {
+          paso1: 'Ve a https://huggingface.co/settings/tokens',
+          paso2: 'Verifica que tu token tenga el permiso "Make calls to inference providers"',
+          paso3: `Visita cada modelo y haz clic en "Agree and access repository":`,
+          modelos: modelos.map(url => url.split('/models/')[1])
+        }
       });
     }
 
