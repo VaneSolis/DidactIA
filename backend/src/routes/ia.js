@@ -88,8 +88,14 @@ Responde en formato JSON como una lista llamada "actividades".
       "https://router.huggingface.co/hf-inference/google/flan-t5-base"
     ];
     
+    if (USE_AI) {
+      console.log('IA activada: ✅');
+      console.log(`Modelos configurados (prioridad): ${modelos.map(url => url.split('/hf-inference/')[1]).join(', ')}`);
+    }
+    
     let response;
     let lastError;
+    let modeloSeleccionado = null;
     
     // Intentar con cada modelo hasta que uno funcione
     for (const modelUrl of modelos) {
@@ -112,6 +118,7 @@ Responde en formato JSON como una lista llamada "actividades".
         // Si la respuesta es exitosa, salir del loop
         if (response.ok) {
           console.log(`✅ Modelo exitoso: ${modelUrl}`);
+          modeloSeleccionado = modelUrl.split('/hf-inference/')[1];
           break;
         } else {
           const errorText = await response.text();
@@ -158,6 +165,10 @@ Responde en formato JSON como una lista llamada "actividades".
           modelos: modelos.map(url => url.split('/hf-inference/')[1])
         }
       });
+    }
+
+    if (modeloSeleccionado) {
+      console.log(`Modelo configurado: ${modeloSeleccionado}`);
     }
 
     // Parsear la respuesta como JSON
