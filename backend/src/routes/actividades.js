@@ -53,7 +53,7 @@ router.post('/generar', async (req, res) => {
     const prompt = `Genera una actividad creativa para la clase de ${materia}, nivel ${grado}, sobre el tema "${tema}". Incluye una descripción corta y una dinámica práctica.`;
 
     const response = await fetch(
-      "https://api-inference.huggingface.co/models/openai-community/gpt2",
+      "https://router.huggingface.co/hf-inference/openai-community/gpt2",
       {
         method: "POST",
         headers: {

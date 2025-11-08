@@ -82,10 +82,10 @@ Responde en formato JSON como una lista llamada "actividades".
     // Visita: https://huggingface.co/models y busca el modelo para aceptarlo
     // Modelos que deberían estar disponibles (en orden de prioridad):
     const modelos = [
-      "https://api-inference.huggingface.co/models/facebook/opt-125m",
-      "https://api-inference.huggingface.co/models/distilgpt2",
-      "https://api-inference.huggingface.co/models/openai-community/gpt2",
-      "https://api-inference.huggingface.co/models/google/flan-t5-base"
+      "https://router.huggingface.co/hf-inference/facebook/opt-125m",
+      "https://router.huggingface.co/hf-inference/distilgpt2",
+      "https://router.huggingface.co/hf-inference/openai-community/gpt2",
+      "https://router.huggingface.co/hf-inference/google/flan-t5-base"
     ];
     
     let response;
@@ -118,7 +118,7 @@ Responde en formato JSON como una lista llamada "actividades".
           console.log(`⚠️ Modelo ${modelUrl} falló: ${response.status} - ${errorText}`);
           
           // Extraer nombre del modelo de la URL
-          const modelName = modelUrl.split('/models/')[1];
+          const modelName = modelUrl.split('/hf-inference/')[1];
           lastError = { 
             status: response.status, 
             message: errorText, 
@@ -155,7 +155,7 @@ Responde en formato JSON como una lista llamada "actividades".
           paso1: 'Ve a https://huggingface.co/settings/tokens',
           paso2: 'Verifica que tu token tenga el permiso "Make calls to inference providers"',
           paso3: `Visita cada modelo y haz clic en "Agree and access repository":`,
-          modelos: modelos.map(url => url.split('/models/')[1])
+          modelos: modelos.map(url => url.split('/hf-inference/')[1])
         }
       });
     }
