@@ -68,7 +68,7 @@ curl http://localhost:4000/actividades
 ```
 DidactIA/
 ├── backend/           # API Node.js + Express
-├── frontend/          # React App
+├── didactia-frontend/ # React App (Vite)
 ├── database/          # Scripts SQL
 ├── docs/             # Documentación
 └── scripts/          # Scripts de configuración

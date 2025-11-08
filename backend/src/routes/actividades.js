@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { db, mockData } from '../db.js';
+import fetch from "node-fetch";
 
 const router = Router();
 
@@ -43,5 +44,52 @@ router.post('/', async (req, res) => {
     res.status(500).json({ message: 'Error al crear la actividad' });
   }
 });
+
+// POST: generar actividad con IA
+router.post('/generar', async (req, res) => {
+  const { tema, grado, materia } = req.body;
+
+  try {
+    const prompt = `Genera una actividad creativa para la clase de ${materia}, nivel ${grado}, sobre el tema "${tema}". Incluye una descripción corta y una dinámica práctica.`;
+
+    const response = await fetch(
+      "https://router.huggingface.co/hf-inference/openai-community/gpt2",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          inputs: prompt,
+          parameters: {
+            max_length: 150,
+            temperature: 0.7,
+          },
+        }),
+      }
+    );
+
+    const data = await response.json();
+
+    if (data.error) {
+      console.error("Error de Hugging Face:", data.error);
+      return res.status(500).json({ error: data.error });
+    }
+
+    const textoGenerado = data[0]?.generated_text || "No se pudo generar la actividad";
+
+    res.json({
+      tema,
+      materia,
+      grado,
+      actividad_generada: textoGenerado,
+    });
+  } catch (error) {
+    console.error("❌ Error al generar actividad con IA:", error);
+    res.status(500).json({ message: "Error al generar la actividad con IA" });
+  }
+});
+
 
 export default router;
