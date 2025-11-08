@@ -67,37 +67,52 @@ router.post('/generar', async (req, res) => {
     });
   }
 
+  const filtros = {
+    materia,
+    tema: tema || objetivo,
+    modalidad,
+    duracion,
+    tipo,
+    nivel: nivel || grado
+  };
+
+  const responderModoSimple = (nota, errorIA = null) => {
+    const actividades = generarActividadesSimples({
+      materia,
+      grado,
+      objetivo,
+      tema,
+      modalidad,
+      duracion,
+      tipo,
+      nivel
+    });
+
+    return res.json({ 
+      actividades, 
+      modo: 'simple',
+      nota,
+      error_ia: errorIA,
+      filtros,
+      instrucciones: {
+        paso1: 'Verifica que OPENAI_API_KEY esté definido en backend/.env',
+        paso2: 'Confirma que tu cuenta de OpenAI tiene acceso al modelo y saldo disponible',
+        paso3: 'Reinicia el backend después de actualizar las credenciales'
+      }
+    });
+  };
+
   try {
-    // 🔑 Clave de Hugging Face (usa variables de entorno)
-    const HF_API_KEY = process.env.HF_API_KEY;
-    // Permitir desactivar IA con USE_AI=false, o usar automáticamente si hay token
-    const USE_AI = process.env.USE_AI !== 'false' && HF_API_KEY;
+    const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+    const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+    const USE_AI = process.env.USE_AI !== 'false' && OPENAI_API_KEY;
     
     // Si no hay API key o está deshabilitada, usar generación simple
     if (!USE_AI) {
       console.log('Generando actividades sin IA (modo simple)');
-      const actividades = generarActividadesSimples({
-        materia,
-        grado,
-        objetivo,
-        tema,
-        modalidad,
-        duracion,
-        tipo,
-        nivel
-      });
-      return res.json({ 
-        actividades, 
-        modo: 'simple',
-        filtros: {
-          materia,
-          tema: tema || objetivo,
-          modalidad,
-          duracion,
-          tipo,
-          nivel: nivel || grado
-        }
-      });
+      return responderModoSimple(
+        'La IA está desactivada o la clave de OpenAI no está configurada.'
+      );
     }
 
     // 🧠 Prompt: texto que se enviará al modelo de IA
@@ -108,166 +123,82 @@ router.post('/generar', async (req, res) => {
     const tipoDescripcion = tipo ? `Tipo de actividad: ${tipo}.` : '';
 
     const prompt = `
-Eres un asistente educativo. Genera 3 actividades breves y concretas para estudiantes de ${nivelEducativo} en la materia de ${materia}.
+Genera 3 actividades breves y concretas para estudiantes de ${nivelEducativo} en la materia de ${materia}.
 Tema central: ${tema || objetivo}.
 ${modalidadTexto}
 ${tipoDescripcion}
 Duración estimada para cada actividad: ${duracionTexto}.
 Objetivo educativo: "${objetivoEducativo}".
 
-Cada actividad debe incluir:
-- "titulo"
-- "descripcion"
-- "nivel" (especificando el nivel educativo o dificultad sugerida)
-- "duracion" (texto corto con la duración aproximada)
-
-Devuelve únicamente un JSON válido con una lista llamada "actividades".
+Devuelve únicamente un JSON válido con una lista llamada "actividades" en el siguiente formato:
+[
+  {
+    "titulo": "...",
+    "descripcion": "...",
+    "nivel": "...",
+    "duracion": "..."
+  }
+]
 `;
 
-    // 🚀 Llamada a la API de Hugging Face
-    // Nota: Muchos modelos requieren que los aceptes primero en huggingface.co
-    // Visita: https://huggingface.co/models y busca el modelo para aceptarlo
-    // Modelos que deberían estar disponibles (en orden de prioridad):
-    const modelos = [
-      "https://router.huggingface.co/hf-inference/facebook/opt-125m",
-      "https://router.huggingface.co/hf-inference/distilgpt2",
-      "https://router.huggingface.co/hf-inference/openai-community/gpt2",
-      "https://router.huggingface.co/hf-inference/google/flan-t5-base"
-    ];
-    
-    if (USE_AI) {
-      console.log('IA activada: ✅');
-      console.log(`Modelos configurados (prioridad): ${modelos.map(url => url.split('/hf-inference/')[1]).join(', ')}`);
-    }
-    
-    let response;
-    let lastError;
-    let modeloSeleccionado = null;
-    
-    // Intentar con cada modelo hasta que uno funcione
-    for (const modelUrl of modelos) {
-      try {
-        response = await fetch(modelUrl, {
-      method: "POST",
+    console.log('IA (OpenAI) activada: ✅');
+    console.log(`Modelo configurado: ${OPENAI_MODEL}`);
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
       headers: {
-        "Authorization": `Bearer ${HF_API_KEY}`,
-        "Content-Type": "application/json"
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'Content-Type': 'application/json'
       },
-          body: JSON.stringify({ 
-            inputs: prompt,
-            parameters: {
-              max_length: 500,
-              return_full_text: false
-            }
-          })
-        });
-        
-        // Si la respuesta es exitosa, salir del loop
-        if (response.ok) {
-          console.log(`✅ Modelo exitoso: ${modelUrl}`);
-          modeloSeleccionado = modelUrl.split('/hf-inference/')[1];
-          break;
-        } else {
-          const errorText = await response.text();
-          console.log(`⚠️ Modelo ${modelUrl} falló: ${response.status} - ${errorText}`);
-          
-          // Extraer nombre del modelo de la URL
-          const modelName = modelUrl.split('/hf-inference/')[1];
-          lastError = { 
-            status: response.status, 
-            message: errorText, 
-            model: modelName,
-            url: modelUrl,
-            solucion: response.status === 404 
-              ? `Visita https://huggingface.co/${modelName} y haz clic en "Agree and access repository" para aceptar el modelo`
-              : 'Verifica que tu token tenga permisos de inferencia en Hugging Face Settings'
-          };
-        }
-      } catch (fetchError) {
-        console.log(`⚠️ Error al llamar ${modelUrl}:`, fetchError.message);
-        lastError = { error: fetchError.message, model: modelUrl };
-      }
-    }
-    
-    // Si todos los modelos fallaron, usar generación simple
-    if (!response || !response.ok) {
-      console.log('❌ Todos los modelos de IA fallaron, usando generación simple');
-      const actividades = generarActividadesSimples({
-        materia,
-        grado,
-        objetivo,
-        tema,
-        modalidad,
-        duracion,
-        tipo,
-        nivel
-      });
-      
-      // Crear mensaje más útil con instrucciones
-      let mensaje = 'La IA no está disponible, se generaron actividades básicas.';
-      if (lastError?.solucion) {
-        mensaje += ` ${lastError.solucion}`;
-      }
-      
-      return res.json({ 
-        actividades, 
-        modo: 'simple',
-        nota: mensaje,
-        error_ia: lastError,
-        filtros: {
-          materia,
-          tema: tema || objetivo,
-          modalidad,
-          duracion,
-          tipo,
-          nivel: nivel || grado
-        },
-        instrucciones: {
-          paso1: 'Ve a https://huggingface.co/settings/tokens',
-          paso2: 'Verifica que tu token tenga el permiso "Make calls to inference providers"',
-          paso3: `Visita cada modelo y haz clic en "Agree and access repository":`,
-          modelos: modelos.map(url => url.split('/hf-inference/')[1])
-        }
-      });
+      body: JSON.stringify({
+        model: OPENAI_MODEL,
+        temperature: 0.7,
+        messages: [
+          {
+            role: 'system',
+            content: 'Eres un asistente educativo especializado en diseñar actividades pedagógicas. Responde siempre con JSON válido y sin texto adicional.'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ]
+      })
+    });
+
+    const rawResponse = await response.text();
+
+    if (!response.ok) {
+      console.error('⚠️ Error desde OpenAI:', rawResponse);
+      return responderModoSimple(
+        'La IA no está disponible, se generaron actividades básicas.',
+        { status: response.status, message: rawResponse }
+      );
     }
 
-    if (modeloSeleccionado) {
-      console.log(`Modelo configurado: ${modeloSeleccionado}`);
-    }
-
-    // Parsear la respuesta como JSON
     let data;
     try {
-      data = await response.json();
+      data = JSON.parse(rawResponse);
     } catch (jsonError) {
-      const errorText = await response.text();
-      console.error('Error parseando JSON de Hugging Face:', errorText);
-      return res.status(500).json({ 
-        error: 'La respuesta de Hugging Face no es válida JSON',
-        respuesta: errorText
-      });
+      console.error('Error parseando respuesta de OpenAI:', rawResponse);
+      return responderModoSimple(
+        'La IA respondió con un formato inesperado, se generaron actividades básicas.',
+        { error: 'JSON inválido desde OpenAI' }
+      );
     }
 
-    // 💡 Manejar diferentes formatos de respuesta de Hugging Face
-    let generatedText = '';
-    
-    if (Array.isArray(data) && data[0]?.generated_text) {
-      // Formato: [{generated_text: "..."}]
-      generatedText = data[0].generated_text;
-    } else if (data.generated_text) {
-      // Formato: {generated_text: "..."}
-      generatedText = data.generated_text;
-    } else if (Array.isArray(data) && data[0]?.text) {
-      // Otro formato posible
-      generatedText = data[0].text;
-    } else {
-      console.error('Respuesta inesperada de Hugging Face:', JSON.stringify(data, null, 2));
-      return res.status(500).json({ 
-        error: 'No se pudo extraer el texto generado de la respuesta', 
-        respuesta: data,
-        sugerencia: 'El modelo puede estar cargándose o el formato de respuesta cambió. Intenta nuevamente en unos segundos.'
-      });
+    const content = data?.choices?.[0]?.message?.content?.trim();
+    if (!content) {
+      console.error('Respuesta vacía de OpenAI:', data);
+      return responderModoSimple(
+        'La IA no devolvió contenido válido, se generaron actividades básicas.',
+        { error: 'Respuesta vacía de OpenAI' }
+      );
     }
+
+    // 💡 Intentar extraer JSON del contenido devuelto por OpenAI
+    let generatedText = '';
+    generatedText = content;
 
     // 🧹 Intentar parsear JSON del texto generado
     let actividades;
@@ -291,26 +222,24 @@ Devuelve únicamente un JSON válido con una lista llamada "actividades".
       actividades = [{
         titulo: "Actividad generada",
         descripcion: generatedText.substring(0, 200),
-        nivel: "medio"
+        nivel: "medio",
+        duracion: duracion ? `${duracion} minutos` : '40 minutos'
       }];
     }
 
     res.json({ 
       actividades,
       modo: 'ia',
-      filtros: {
-        materia,
-        tema: tema || objetivo,
-        modalidad,
-        duracion,
-        tipo,
-        nivel: nivel || grado
-      }
+      filtros,
+      modelo: OPENAI_MODEL
     });
 
   } catch (error) {
     console.error('Error generando actividades:', error);
-    res.status(500).json({ error: 'Error interno generando actividades', details: error.message });
+    return responderModoSimple(
+      'Ocurrió un error interno al usar la IA, se generaron actividades básicas.',
+      { error: error.message }
+    );
   }
 });
 

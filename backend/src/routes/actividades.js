@@ -49,41 +49,91 @@ router.post('/', async (req, res) => {
 router.post('/generar', async (req, res) => {
   const { tema, grado, materia } = req.body;
 
+  const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+  const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+
+  if (!OPENAI_API_KEY) {
+    return res.status(503).json({
+      message: 'La IA no está configurada. Define OPENAI_API_KEY en backend/.env o habilita USE_AI=false.'
+    });
+  }
+
   try {
-    const prompt = `Genera una actividad creativa para la clase de ${materia}, nivel ${grado}, sobre el tema "${tema}". Incluye una descripción corta y una dinámica práctica.`;
+    const prompt = `Genera una única actividad creativa para la materia ${materia}, nivel ${grado}, sobre el tema "${tema}".
+Responde exclusivamente en formato JSON con el siguiente esquema:
+{
+  "titulo": "...",
+  "descripcion": "...",
+  "dinamica": "...",
+  "materiales": ["...", "..."],
+  "duracion": "tiempo estimado en minutos"
+}`;
 
-    const response = await fetch(
-      "https://router.huggingface.co/hf-inference/openai-community/gpt2",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          inputs: prompt,
-          parameters: {
-            max_length: 150,
-            temperature: 0.7,
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: OPENAI_MODEL,
+        temperature: 0.7,
+        messages: [
+          {
+            role: 'system',
+            content: 'Eres un asistente educativo que propone actividades prácticas. Entrega siempre JSON válido y sin texto adicional.'
           },
-        }),
-      }
-    );
+          {
+            role: 'user',
+            content: prompt
+          }
+        ]
+      })
+    });
 
-    const data = await response.json();
+    const raw = await response.text();
 
-    if (data.error) {
-      console.error("Error de Hugging Face:", data.error);
-      return res.status(500).json({ error: data.error });
+    if (!response.ok) {
+      console.error('Error de OpenAI en /actividades/generar:', raw);
+      return res.status(response.status).json({
+        message: 'No se pudo generar la actividad con IA',
+        detalle: raw
+      });
     }
 
-    const textoGenerado = data[0]?.generated_text || "No se pudo generar la actividad";
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch (err) {
+      console.error('Formato inválido desde OpenAI:', raw);
+      return res.status(500).json({ message: 'Respuesta inválida de la IA' });
+    }
+
+    const content = data?.choices?.[0]?.message?.content?.trim();
+
+    if (!content) {
+      return res.status(500).json({ message: 'La IA no devolvió contenido válido' });
+    }
+
+    let actividadGenerada;
+    try {
+      actividadGenerada = JSON.parse(content);
+    } catch (err) {
+      console.warn('No se pudo parsear JSON, devolviendo texto plano');
+      actividadGenerada = {
+        titulo: 'Actividad sugerida',
+        descripcion: content,
+        dinamica: content,
+        materiales: [],
+        duracion: '40 minutos'
+      };
+    }
 
     res.json({
       tema,
       materia,
       grado,
-      actividad_generada: textoGenerado,
+      actividad_generada: actividadGenerada
     });
   } catch (error) {
     console.error("❌ Error al generar actividad con IA:", error);
