@@ -3,12 +3,14 @@ import ListaClases from '../components/ListaClases'
 import FormularioClase from '../components/FormularioClase'
 import FormularioMaestro from '../components/FormularioMaestro'
 import DetalleClase from '../components/DetalleClase'
+import GeneradorActividadesIA from '../components/GeneradorActividadesIA'
 import api from '../api'
 
 function Home() {
   const [selectedClase, setSelectedClase] = useState(null)
   const [showFormClase, setShowFormClase] = useState(false)
   const [showFormMaestro, setShowFormMaestro] = useState(false)
+  const [showGeneradorIA, setShowGeneradorIA] = useState(false)
   const [claseToEdit, setClaseToEdit] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const [backendStatus, setBackendStatus] = useState('checking')
@@ -34,6 +36,8 @@ function Home() {
   const handleSelectClase = (clase) => {
     setSelectedClase(clase)
     setShowFormClase(false)
+    setShowFormMaestro(false)
+    setShowGeneradorIA(false)
   }
 
   const handleNuevaClase = () => {
@@ -41,12 +45,23 @@ function Home() {
     setClaseToEdit(null)
     setShowFormClase(true)
     setShowFormMaestro(false)
+    setShowGeneradorIA(false)
   }
 
   const handleNuevoMaestro = () => {
     setShowFormMaestro(true)
     setShowFormClase(false)
     setSelectedClase(null)
+    setShowGeneradorIA(false)
+  }
+
+  const handleGeneradorIA = () => {
+    setShowFormMaestro(false)
+    setShowFormClase(false)
+    if (!showGeneradorIA) {
+      setSelectedClase(null)
+    }
+    setShowGeneradorIA((prev) => !prev)
   }
 
   const handleSaveClaseSuccess = () => {
@@ -64,6 +79,7 @@ function Home() {
 
   const handleCloseDetail = () => {
     setSelectedClase(null)
+    setShowGeneradorIA(false)
   }
 
   const handleVerClases = () => {
@@ -142,6 +158,21 @@ function Home() {
         >
           👤 Agregar Maestro
         </button>
+        <button
+          onClick={handleGeneradorIA}
+          style={{
+            padding: '10px 20px',
+            backgroundColor: '#6f42c1',
+            color: 'white',
+            border: 'none',
+            borderRadius: '5px',
+            cursor: 'pointer',
+            fontSize: '16px',
+            fontWeight: 'bold'
+          }}
+        >
+          🤖 {showGeneradorIA ? 'Ocultar IA' : 'Generar con IA'}
+        </button>
       </div>
 
       {/* Formulario de Maestro */}
@@ -164,6 +195,11 @@ function Home() {
             refreshTrigger={refreshKey}
           />
         </div>
+      )}
+
+      {/* Generador de actividades con IA */}
+      {showGeneradorIA && (
+        <GeneradorActividadesIA />
       )}
 
       {/* Detalle de Clase */}

@@ -4,35 +4,41 @@ import 'dotenv/config';
 const router = express.Router();
 
 // Función para generar actividades simples sin IA
-function generarActividadesSimples(materia, grado, objetivo) {
-  // Generar actividades más detalladas y útiles
-  const actividades = [
+function generarActividadesSimples({ materia, grado, objetivo, tema, modalidad, duracion, tipo, nivel }) {
+  const temaCentral = tema || objetivo || 'el tema indicado';
+  const nivelEducativo = nivel || grado || 'el nivel seleccionado';
+  const modalidadTexto = modalidad === 'grupal' ? 'trabajo colaborativo en equipo' : 'trabajo individual y reflexión personal';
+  const duracionTexto = duracion ? `${duracion} minutos` : '35 minutos';
+  const tipoActividad = tipo || 'desarrollo';
+
+  return [
     {
-      titulo: `Actividad 1: Introducción y Fundamentos de ${materia}`,
-      descripcion: `Ejercicios básicos de ${materia} diseñados para estudiantes de ${grado} grado. Esta actividad introduce conceptos fundamentales a través de ejemplos prácticos y ejercicios guiados. Objetivo: ${objetivo}. Incluye ejercicios paso a paso para asegurar la comprensión inicial.`,
-      nivel: 'bajo',
-      tipo: 'introducción'
+      titulo: `Actividad 1 (${tipoActividad.toUpperCase()}): Explorando ${temaCentral}`,
+      descripcion: `Introduce el tema de ${temaCentral} en la materia de ${materia} con una dinámica de ${modalidadTexto}. El objetivo es activar conocimientos previos, motivar al grupo y establecer el propósito de la sesión para estudiantes de ${nivelEducativo}.`,
+      nivel: nivelEducativo,
+      tipo: tipoActividad,
+      duracion: duracionTexto
     },
     {
-      titulo: `Actividad 2: Practica y Refuerzo de ${materia}`,
-      descripcion: `Ejercicios intermedios de ${materia} que refuerzan los conceptos aprendidos. Diseñados para estudiantes de ${grado} grado, estos ejercicios permiten practicar y consolidar conocimientos. Enfocado en: ${objetivo}. Incluye problemas prácticos y situaciones reales.`,
-      nivel: 'medio',
-      tipo: 'práctica'
+      titulo: `Actividad 2 (${tipoActividad.toUpperCase()}): Aplicación práctica`,
+      descripcion: `Profundiza en ${temaCentral} mediante ejercicios guiados que permitan a los alumnos aplicar lo aprendido. La actividad se realiza con modalidad ${modalidadTexto} y busca consolidar el objetivo propuesto para ${nivelEducativo}.`,
+      nivel: nivelEducativo,
+      tipo: tipoActividad,
+      duracion: duracionTexto
     },
     {
-      titulo: `Actividad 3: Evaluación y Aplicación Avanzada de ${materia}`,
-      descripcion: `Actividad de evaluación completa para estudiantes de ${grado} grado que demuestra el dominio de ${materia}. Esta actividad incluye problemas más complejos y situaciones que requieren aplicar múltiples conceptos. Objetivo: ${objetivo}. Ideal para evaluar el progreso y preparar para niveles superiores.`,
-      nivel: 'alto',
-      tipo: 'evaluación'
+      titulo: `Actividad 3 (${tipoActividad.toUpperCase()}): Cierre reflexivo`,
+      descripcion: `Cierra la sesión invitando a los estudiantes de ${nivelEducativo} a compartir hallazgos clave de ${temaCentral}, destacando logros y áreas de mejora. Mantén la modalidad ${modalidadTexto} para fomentar la metacognición.`,
+      nivel: nivelEducativo,
+      tipo: tipoActividad,
+      duracion: duracionTexto
     }
   ];
-  
-  return actividades;
 }
 
 /**
  * POST /actividades/generar
- * Body esperado: { materia, grado, objetivo }
+ * Body esperado: { materia, tema, modalidad, duracion, tipo, nivel }
  */
 router.post('/generar', async (req, res) => {
   // Verificar que el body esté presente
@@ -43,11 +49,20 @@ router.post('/generar', async (req, res) => {
     });
   }
 
-  const { materia, grado, objetivo } = req.body;
+  const {
+    materia,
+    grado,
+    objetivo,
+    tema,
+    modalidad,
+    duracion,
+    tipo,
+    nivel
+  } = req.body;
 
-  if (!materia || !grado || !objetivo) {
+  if (!materia || !(tema || objetivo) || !(nivel || grado)) {
     return res.status(400).json({ 
-      error: 'Faltan campos requeridos (materia, grado, objetivo).',
+      error: 'Faltan campos requeridos. Asegúrate de enviar materia, tema (u objetivo) y nivel educativo.',
       recibido: req.body 
     });
   }
@@ -61,20 +76,52 @@ router.post('/generar', async (req, res) => {
     // Si no hay API key o está deshabilitada, usar generación simple
     if (!USE_AI) {
       console.log('Generando actividades sin IA (modo simple)');
-      const actividades = generarActividadesSimples(materia, grado, objetivo);
-      return res.json({ actividades, modo: 'simple' });
+      const actividades = generarActividadesSimples({
+        materia,
+        grado,
+        objetivo,
+        tema,
+        modalidad,
+        duracion,
+        tipo,
+        nivel
+      });
+      return res.json({ 
+        actividades, 
+        modo: 'simple',
+        filtros: {
+          materia,
+          tema: tema || objetivo,
+          modalidad,
+          duracion,
+          tipo,
+          nivel: nivel || grado
+        }
+      });
     }
 
     // 🧠 Prompt: texto que se enviará al modelo de IA
+    const nivelEducativo = nivel || grado;
+    const objetivoEducativo = objetivo || `Lograr aprendizaje significativo sobre ${tema}`;
+    const duracionTexto = duracion ? `${duracion} minutos` : '40 minutos';
+    const modalidadTexto = modalidad ? `Modalidad principal: ${modalidad}.` : '';
+    const tipoDescripcion = tipo ? `Tipo de actividad: ${tipo}.` : '';
+
     const prompt = `
-Eres un asistente educativo. Genera 3 actividades breves para estudiantes de ${grado} grado 
-en la materia de ${materia}. 
-Cada actividad debe tener:
-- un título
-- una descripción
-- un nivel de dificultad (bajo, medio o alto)
-El objetivo educativo es: "${objetivo}".
-Responde en formato JSON como una lista llamada "actividades".
+Eres un asistente educativo. Genera 3 actividades breves y concretas para estudiantes de ${nivelEducativo} en la materia de ${materia}.
+Tema central: ${tema || objetivo}.
+${modalidadTexto}
+${tipoDescripcion}
+Duración estimada para cada actividad: ${duracionTexto}.
+Objetivo educativo: "${objetivoEducativo}".
+
+Cada actividad debe incluir:
+- "titulo"
+- "descripcion"
+- "nivel" (especificando el nivel educativo o dificultad sugerida)
+- "duracion" (texto corto con la duración aproximada)
+
+Devuelve únicamente un JSON válido con una lista llamada "actividades".
 `;
 
     // 🚀 Llamada a la API de Hugging Face
@@ -88,8 +135,14 @@ Responde en formato JSON como una lista llamada "actividades".
       "https://router.huggingface.co/hf-inference/google/flan-t5-base"
     ];
     
+    if (USE_AI) {
+      console.log('IA activada: ✅');
+      console.log(`Modelos configurados (prioridad): ${modelos.map(url => url.split('/hf-inference/')[1]).join(', ')}`);
+    }
+    
     let response;
     let lastError;
+    let modeloSeleccionado = null;
     
     // Intentar con cada modelo hasta que uno funcione
     for (const modelUrl of modelos) {
@@ -112,6 +165,7 @@ Responde en formato JSON como una lista llamada "actividades".
         // Si la respuesta es exitosa, salir del loop
         if (response.ok) {
           console.log(`✅ Modelo exitoso: ${modelUrl}`);
+          modeloSeleccionado = modelUrl.split('/hf-inference/')[1];
           break;
         } else {
           const errorText = await response.text();
@@ -138,7 +192,16 @@ Responde en formato JSON como una lista llamada "actividades".
     // Si todos los modelos fallaron, usar generación simple
     if (!response || !response.ok) {
       console.log('❌ Todos los modelos de IA fallaron, usando generación simple');
-      const actividades = generarActividadesSimples(materia, grado, objetivo);
+      const actividades = generarActividadesSimples({
+        materia,
+        grado,
+        objetivo,
+        tema,
+        modalidad,
+        duracion,
+        tipo,
+        nivel
+      });
       
       // Crear mensaje más útil con instrucciones
       let mensaje = 'La IA no está disponible, se generaron actividades básicas.';
@@ -151,6 +214,14 @@ Responde en formato JSON como una lista llamada "actividades".
         modo: 'simple',
         nota: mensaje,
         error_ia: lastError,
+        filtros: {
+          materia,
+          tema: tema || objetivo,
+          modalidad,
+          duracion,
+          tipo,
+          nivel: nivel || grado
+        },
         instrucciones: {
           paso1: 'Ve a https://huggingface.co/settings/tokens',
           paso2: 'Verifica que tu token tenga el permiso "Make calls to inference providers"',
@@ -158,6 +229,10 @@ Responde en formato JSON como una lista llamada "actividades".
           modelos: modelos.map(url => url.split('/hf-inference/')[1])
         }
       });
+    }
+
+    if (modeloSeleccionado) {
+      console.log(`Modelo configurado: ${modeloSeleccionado}`);
     }
 
     // Parsear la respuesta como JSON
@@ -220,7 +295,18 @@ Responde en formato JSON como una lista llamada "actividades".
       }];
     }
 
-    res.json({ actividades });
+    res.json({ 
+      actividades,
+      modo: 'ia',
+      filtros: {
+        materia,
+        tema: tema || objetivo,
+        modalidad,
+        duracion,
+        tipo,
+        nivel: nivel || grado
+      }
+    });
 
   } catch (error) {
     console.error('Error generando actividades:', error);
