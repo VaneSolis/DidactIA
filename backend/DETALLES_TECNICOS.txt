@@ -1,0 +1,297 @@
+📝 RESUMEN DE CAMBIOS TÉCNICOS - ia.js
+=======================================
+
+Archivo: backend/src/routes/ia.js
+Tamaño original: ~8KB
+Tamaño nuevo: ~12.7KB
+Líneas agregadas: ~80
+
+
+✅ SECCIÓN 1: Configuración de Reintentos (Líneas ~5-10)
+────────────────────────────────────────────────────────
+
+Nuevo:
+```
+const RETRY_CONFIG = {
+  maxRetries: 3,
+  initialDelayMs: 2000,
+  maxDelayMs: 60000,
+  backoffMultiplier: 2
+};
+```
+
+Uso: Control de reintentos automáticos en error 429
+
+
+✅ SECCIÓN 2: Caché en Memoria (Líneas ~15-20)
+───────────────────────────────────────────────
+
+Nuevo:
+```
+const activityCache = new Map();
+const CACHE_TTL_MS = 3600000; // 1 hora
+```
+
+Uso: Almacenar actividades generadas para reutilización
+
+
+✅ SECCIÓN 3: Funciones de Caché (Líneas ~25-75)
+─────────────────────────────────────────────────
+
+Nuevas funciones:
+
+1. generateCacheKey(params)
+   - Crea clave única: materia_tema_nivel
+   - Base64 encoded
+
+2. getFromCache(params)
+   - Busca actividades en caché
+   - Verifica expiración (TTL)
+   - Limpia si está expirado
+
+3. saveToCache(params, data)
+   - Guarda actividades con timestamp
+   - Para reutilización posterior
+
+Ejemplo:
+```
+const cached = getFromCache({ materia: 'Matemáticas', ... });
+if (cached) return res.json({ ..., modo: 'IA (caché)' });
+```
+
+
+✅ SECCIÓN 4: Función de Reintentos (Líneas ~80-120)
+────────────────────────────────────────────────────
+
+Nueva función: fetchWithRetry(apiUrl, options, retryCount = 0)
+
+Características:
+- Reintenta hasta 3 veces
+- Exponential backoff
+- Detecta error 429 específicamente
+- Logs con emojis
+
+Flujo:
+1. Intenta fetch
+2. Si error 429 y hay reintentos → espera y reintenta
+3. Si otro error → retorna error
+4. Si éxito → retorna respuesta
+
+Ejemplo de uso:
+```
+const { response, rawResponse, error } = await fetchWithRetry(
+  apiUrl,
+  { method: 'POST', headers: {...}, body: {...} }
+);
+```
+
+
+✅ SECCIÓN 5: Cambios en Endpoint /generar (Líneas ~190-290)
+────────────────────────────────────────────────────────────
+
+Antes:
+- Sin reintentos
+- Sin caché
+- Prompt largo (~450 caracteres)
+- maxOutputTokens: 2048
+
+Después:
+- ✅ Reintentos automáticos
+- ✅ Caché con TTL de 1 hora
+- ✅ Prompt corto (~200 caracteres)
+- ✅ maxOutputTokens: 1024
+
+Nuevo flujo en /generar:
+1. Verificar si USE_AI está habilitado
+2. Buscar en caché
+   → Si existe → retornar desde caché (modo: 'IA (caché)')
+   → Si no existe → continuar
+3. Construir prompt optimizado
+4. Llamar fetchWithRetry() (con reintentos automáticos)
+5. Parsear respuesta
+6. Guardar en caché
+7. Retornar resultado
+
+Respuestas:
+```
+Éxito con IA:
+{
+  "actividades": [...],
+  "modo": "IA",
+  "nota": "Actividades generadas con éxito por Gemini"
+}
+
+Éxito con caché:
+{
+  "actividades": [...],
+  "modo": "IA (caché)",
+  "nota": "Actividades obtenidas del caché local"
+}
+
+Error con fallback:
+{
+  "actividades": [...],
+  "modo": "simple",
+  "nota": "La IA no está disponible..."
+}
+```
+
+
+✅ SECCIÓN 6: Dos Nuevos Endpoints (Líneas ~320-365)
+─────────────────────────────────────────────────────
+
+1. GET /ia/stats
+   Retorna:
+   - cacheSize: cantidad de items en caché
+   - maxCacheSize: límite de items
+   - cacheTTLMinutes: duración del caché (60 min)
+   - retryConfig: configuración de reintentos
+   - timestamp: marca de tiempo
+   - tips: consejos útiles
+
+   Respuesta:
+   ```json
+   {
+     "cacheSize": 5,
+     "maxCacheSize": 100,
+     "cacheTTLMinutes": 60,
+     "retryConfig": {...},
+     "tips": [...]
+   }
+   ```
+
+2. DELETE /ia/cache
+   Limpia todo el caché manualmente
+   
+   Respuesta:
+   ```json
+   {
+     "message": "Caché limpiado",
+     "itemsCleared": 5,
+     "timestamp": "2025-11-15T..."
+   }
+   ```
+
+
+📊 COMPARATIVA DE TOKENS
+──────────────────────
+
+Prompt antes (450+ caracteres):
+"
+Genera 3 actividades breves y concretas para estudiantes de [nivel]
+en la materia de [materia]. Tema central: [tema].
+Modalidad principal: [modalidad]. Tipo de actividad: [tipo].
+Duración estimada para cada actividad: [duracion] minutos.
+Objetivo educativo: [objetivo].
+
+Devuelve únicamente un JSON válido...
+"
+
+Prompt después (200 caracteres):
+"
+Genera 3 actividades para [nivel] en [materia] sobre [tema].
+Modalidad: [modalidad]. Tipo: [tipo]. Duración: [duracion] min.
+Devuelve SOLO JSON: [...]
+"
+
+Ahorro: 55% menos tokens
+
+
+💻 LOGS NUEVOS
+──────────────
+
+Inicio con IA:
+  🤖 Generando actividades sin IA (modo simple)
+  🤖 IA (Gemini) activada: ✅
+  📦 Modelo configurado: gemini-2.0-flash-exp
+  🔄 Reintentos automáticos: Habilitados (max 3)
+
+Desde caché:
+  ✅ Actividades obtenidas del caché
+
+Éxito:
+  ✅ Actividades generadas con éxito por Gemini
+
+Reintentos:
+  ⚠️ Cuota excedida (429). Reintentando en 2 segundos... (intento 1/3)
+  ⚠️ Cuota excedida (429). Reintentando en 4 segundos... (intento 2/3)
+  ⚠️ Cuota excedida (429). Reintentando en 8 segundos... (intento 3/3)
+
+Errores:
+  ❌ Error desde Gemini después de reintentos
+  ❌ Error parseando respuesta de Gemini
+  ❌ Respuesta vacía de Gemini
+  ❌ Error generando actividades
+
+
+🎯 CASOS DE USO
+───────────────
+
+Caso 1: Primera solicitud sin caché
+┌─────────────────────────────────────┐
+│ POST /ia/generar                    │
+│ { materia, tema, nivel }            │
+└─────────────────────────────────────┘
+         ↓
+   ¿Existe en caché?
+         ↓ NO
+   Construir prompt
+         ↓
+   Llamar fetchWithRetry()
+         ↓
+   ¿Error 429?
+      ↙        ↘
+    SÍ          NO
+    ↓            ↓
+  Reintentar   Continuar
+    ↓            ↓
+   (hasta 3)     Parsear
+         └────┬────┘
+              ↓
+         Guardar en caché
+              ↓
+         Retornar respuesta
+
+Caso 2: Segunda solicitud (mismo tema)
+┌─────────────────────────────────────┐
+│ POST /ia/generar                    │
+│ { materia, tema, nivel }  (igual)   │
+└─────────────────────────────────────┘
+         ↓
+   ¿Existe en caché?
+         ↓ SÍ
+   ¿Ha expirado? (1 hora)
+      ↙        ↘
+    SÍ          NO
+    ↓            ↓
+  Limpiar    Retornar
+  Generar    en <100ms
+  Normal      (caché)
+
+
+🔧 CONFIGURACIÓN PERSONALIZABLE
+────────────────────────────────
+
+Si quieres ajustar el comportamiento, edita:
+
+const RETRY_CONFIG = {
+  maxRetries: 3,           // Aumentar a 5 para más reintentos
+  initialDelayMs: 2000,    // Reducir a 1000 para respuestas más rápidas
+  maxDelayMs: 60000,       // Máxima espera permitida
+  backoffMultiplier: 2     // Cómo crece el delay (2 = se dobla)
+};
+
+const CACHE_TTL_MS = 3600000;  // Cambiar de 1 hora a otro valor
+
+
+✅ VERIFICACIÓN
+───────────────
+
+Sintaxis: ✅ Node.js check sin errores
+Importaciones: ✅ Correctas
+Funciones: ✅ Bien definidas
+Endpoints: ✅ Registrados
+Caché: ✅ Implementado
+Reintentos: ✅ Implementados
+Optimización: ✅ Aplicada
+

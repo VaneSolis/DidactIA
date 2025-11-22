@@ -45,101 +45,22 @@ router.post('/', async (req, res) => {
   }
 });
 
+
 // POST: generar actividad con IA
 router.post('/generar', async (req, res) => {
-  const { tema, grado, materia } = req.body;
+  const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL;
 
-  const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-  const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+  const response = await fetch(N8N_WEBHOOK_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req.body)
+  });
 
-  if (!OPENAI_API_KEY) {
-    return res.status(503).json({
-      message: 'La IA no está configurada. Define OPENAI_API_KEY en backend/.env o habilita USE_AI=false.'
-    });
-  }
-
-  try {
-    const prompt = `Genera una única actividad creativa para la materia ${materia}, nivel ${grado}, sobre el tema "${tema}".
-Responde exclusivamente en formato JSON con el siguiente esquema:
-{
-  "titulo": "...",
-  "descripcion": "...",
-  "dinamica": "...",
-  "materiales": ["...", "..."],
-  "duracion": "tiempo estimado en minutos"
-}`;
-
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: OPENAI_MODEL,
-        temperature: 0.7,
-        messages: [
-          {
-            role: 'system',
-            content: 'Eres un asistente educativo que propone actividades prácticas. Entrega siempre JSON válido y sin texto adicional.'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ]
-      })
-    });
-
-    const raw = await response.text();
-
-    if (!response.ok) {
-      console.error('Error de OpenAI en /actividades/generar:', raw);
-      return res.status(response.status).json({
-        message: 'No se pudo generar la actividad con IA',
-        detalle: raw
-      });
-    }
-
-    let data;
-    try {
-      data = JSON.parse(raw);
-    } catch (err) {
-      console.error('Formato inválido desde OpenAI:', raw);
-      return res.status(500).json({ message: 'Respuesta inválida de la IA' });
-    }
-
-    const content = data?.choices?.[0]?.message?.content?.trim();
-
-    if (!content) {
-      return res.status(500).json({ message: 'La IA no devolvió contenido válido' });
-    }
-
-    let actividadGenerada;
-    try {
-      actividadGenerada = JSON.parse(content);
-    } catch (err) {
-      console.warn('No se pudo parsear JSON, devolviendo texto plano');
-      actividadGenerada = {
-        titulo: 'Actividad sugerida',
-        descripcion: content,
-        dinamica: content,
-        materiales: [],
-        duracion: '40 minutos'
-      };
-    }
-
-    res.json({
-      tema,
-      materia,
-      grado,
-      actividad_generada: actividadGenerada
-    });
-  } catch (error) {
-    console.error("❌ Error al generar actividad con IA:", error);
-    res.status(500).json({ message: "Error al generar la actividad con IA" });
-  }
+  const data = await response.json();
+  return res.json(data);
 });
+
+
 
 
 export default router;

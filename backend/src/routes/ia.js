@@ -3,6 +3,105 @@ import 'dotenv/config';
 
 const router = express.Router();
 
+// 🔄 Configuración de reintentos automáticos
+const RETRY_CONFIG = {
+  maxRetries: 3,
+  initialDelayMs: 2000,      // 2 segundos
+  maxDelayMs: 60000,         // 60 segundos
+  backoffMultiplier: 2       // Exponential backoff
+};
+
+// 💾 Caché simple en memoria para actividades generadas (opcional)
+const activityCache = new Map();
+const CACHE_TTL_MS = 3600000; // 1 hora
+
+/**
+ * Genera un hash de los parámetros para usar como clave de caché
+ */
+function generateCacheKey(params) {
+  const key = `${params.materia}_${params.tema || params.objetivo}_${params.nivel || params.grado}`;
+  return Buffer.from(key).toString('base64');
+}
+
+/**
+ * Obtiene actividades del caché si existen y no han expirado
+ */
+function getFromCache(params) {
+  const key = generateCacheKey(params);
+  const cached = activityCache.get(key);
+  
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    console.log('✅ Actividades obtenidas del caché');
+    return cached.data;
+  }
+  
+  // Limpiar caché expirado
+  if (cached) {
+    activityCache.delete(key);
+  }
+  
+  return null;
+}
+
+/**
+ * Guarda actividades en el caché
+ */
+function saveToCache(params, data) {
+  const key = generateCacheKey(params);
+  activityCache.set(key, {
+    data,
+    timestamp: Date.now()
+  });
+}
+
+/**
+ * Realiza reintentos automáticos con exponential backoff
+ * Maneja específicamente el error 429 (quota exceeded)
+ */
+async function fetchWithRetry(apiUrl, options, retryCount = 0) {
+  try {
+    const response = await fetch(apiUrl, options);
+    const rawResponse = await response.text();
+
+    // Si es éxito, retornar
+    if (response.ok) {
+      return { response, rawResponse };
+    }
+
+    // Si es error 429 y hay reintentos disponibles
+    if (response.status === 429 && retryCount < RETRY_CONFIG.maxRetries) {
+      const delayMs = Math.min(
+        RETRY_CONFIG.initialDelayMs * Math.pow(RETRY_CONFIG.backoffMultiplier, retryCount),
+        RETRY_CONFIG.maxDelayMs
+      );
+      
+      console.warn(`⚠️ Cuota excedida (429). Reintentando en ${delayMs / 1000} segundos... (intento ${retryCount + 1}/${RETRY_CONFIG.maxRetries})`);
+      
+      // Esperar antes de reintentar
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+      
+      return fetchWithRetry(apiUrl, options, retryCount + 1);
+    }
+
+    // Si es otro error, retornar el error
+    return { response, rawResponse, error: true };
+  } catch (error) {
+    if (retryCount < RETRY_CONFIG.maxRetries) {
+      const delayMs = Math.min(
+        RETRY_CONFIG.initialDelayMs * Math.pow(RETRY_CONFIG.backoffMultiplier, retryCount),
+        RETRY_CONFIG.maxDelayMs
+      );
+      
+      console.warn(`⚠️ Error de conexión. Reintentando en ${delayMs / 1000} segundos... (intento ${retryCount + 1}/${RETRY_CONFIG.maxRetries})`);
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+      
+      return fetchWithRetry(apiUrl, options, retryCount + 1);
+    }
+    
+    throw error;
+  }
+}
+
 // Función para generar actividades simples sin IA
 function generarActividadesSimples({ materia, grado, objetivo, tema, modalidad, duracion, tipo, nivel }) {
   const temaCentral = tema || objetivo || 'el tema indicado';
@@ -95,84 +194,89 @@ router.post('/generar', async (req, res) => {
       error_ia: errorIA,
       filtros,
       instrucciones: {
-        paso1: 'Verifica que OPENAI_API_KEY esté definido en backend/.env',
-        paso2: 'Confirma que tu cuenta de OpenAI tiene acceso al modelo y saldo disponible',
+        paso1: 'Verifica que GEMINI_API_KEY esté definido en backend/.env',
+        paso2: 'Obtén tu API key en https://makersuite.google.com/app/apikey',
         paso3: 'Reinicia el backend después de actualizar las credenciales'
       }
     });
   };
 
   try {
-    const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-    const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
-    const USE_AI = process.env.USE_AI !== 'false' && OPENAI_API_KEY;
+    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+    const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+    const USE_AI = process.env.USE_AI !== 'false' && GEMINI_API_KEY;
     
     // Si no hay API key o está deshabilitada, usar generación simple
     if (!USE_AI) {
-      console.log('Generando actividades sin IA (modo simple)');
+      console.log('🤖 Generando actividades sin IA (modo simple)');
       return responderModoSimple(
-        'La IA está desactivada o la clave de OpenAI no está configurada.'
+        'La IA está desactivada o la clave de Gemini no está configurada.'
       );
     }
 
-    // 🧠 Prompt: texto que se enviará al modelo de IA
+    // 🧠 Verificar caché primero
+    const cacheParams = { materia, tema, objetivo, nivel, grado };
+    const cachedActivities = getFromCache(cacheParams);
+    if (cachedActivities) {
+      return res.json({
+        actividades: cachedActivities,
+        modo: 'IA (caché)',
+        nota: 'Actividades obtenidas del caché local',
+        filtros: cacheParams
+      });
+    }
+
+    // 🧠 Construir prompt optimizado (menos tokens)
     const nivelEducativo = nivel || grado;
-    const objetivoEducativo = objetivo || `Lograr aprendizaje significativo sobre ${tema}`;
-    const duracionTexto = duracion ? `${duracion} minutos` : '40 minutos';
-    const modalidadTexto = modalidad ? `Modalidad principal: ${modalidad}.` : '';
-    const tipoDescripcion = tipo ? `Tipo de actividad: ${tipo}.` : '';
+    const objetivoEducativo = objetivo || `Aprendizaje en ${tema}`;
+    const duracionTexto = duracion || '40';
+    const modalidadTexto = modalidad || '';
+    const tipoDescripcion = tipo || '';
 
-    const prompt = `
-Genera 3 actividades breves y concretas para estudiantes de ${nivelEducativo} en la materia de ${materia}.
-Tema central: ${tema || objetivo}.
-${modalidadTexto}
-${tipoDescripcion}
-Duración estimada para cada actividad: ${duracionTexto}.
-Objetivo educativo: "${objetivoEducativo}".
+    // Prompt compacto para reducir tokens
+    const prompt = `Genera 3 actividades para ${nivelEducativo} en ${materia} sobre "${tema || objetivo}". 
+${modalidadTexto ? `Modalidad: ${modalidadTexto}. ` : ''}${tipoDescripcion ? `Tipo: ${tipoDescripcion}. ` : ''}Duración: ${duracionTexto} min.
+Devuelve SOLO JSON:
+[{"titulo":"...","descripcion":"...","nivel":"...","duracion":"..."}]`;
 
-Devuelve únicamente un JSON válido con una lista llamada "actividades" en el siguiente formato:
-[
-  {
-    "titulo": "...",
-    "descripcion": "...",
-    "nivel": "...",
-    "duracion": "..."
-  }
-]
-`;
+    console.log('🤖 IA (Gemini) activada: ✅');
+    console.log(`📦 Modelo configurado: ${GEMINI_MODEL}`);
+    console.log('🔄 Reintentos automáticos: Habilitados (max 3)');
 
-    console.log('IA (OpenAI) activada: ✅');
-    console.log(`Modelo configurado: ${OPENAI_MODEL}`);
+    const systemInstruction = 'Responde con JSON válido únicamente.';
+    const fullPrompt = `${systemInstruction}\n${prompt}`;
 
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+    
+    // Usar la función con reintentos
+    const { response, rawResponse, error: fetchError } = await fetchWithRetry(apiUrl, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: OPENAI_MODEL,
-        temperature: 0.7,
-        messages: [
-          {
-            role: 'system',
-            content: 'Eres un asistente educativo especializado en diseñar actividades pedagógicas. Responde siempre con JSON válido y sin texto adicional.'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ]
+        contents: [{
+          parts: [{
+            text: fullPrompt
+          }]
+        }],
+        generationConfig: {
+          temperature: 0.7,
+          topK: 40,
+          topP: 0.95,
+          maxOutputTokens: 1024  // Reducido de 2048
+        }
       })
     });
 
-    const rawResponse = await response.text();
-
-    if (!response.ok) {
-      console.error('⚠️ Error desde OpenAI:', rawResponse);
+    if (fetchError || !response.ok) {
+      console.error('❌ Error desde Gemini después de reintentos:', {
+        status: response?.status,
+        message: rawResponse
+      });
       return responderModoSimple(
-        'La IA no está disponible, se generaron actividades básicas.',
-        { status: response.status, message: rawResponse }
+        'La IA no está disponible después de reintentos, se generaron actividades básicas.',
+        { status: response?.status, message: rawResponse }
       );
     }
 
@@ -180,67 +284,121 @@ Devuelve únicamente un JSON válido con una lista llamada "actividades" en el s
     try {
       data = JSON.parse(rawResponse);
     } catch (jsonError) {
-      console.error('Error parseando respuesta de OpenAI:', rawResponse);
+      console.error('❌ Error parseando respuesta de Gemini:', rawResponse);
       return responderModoSimple(
         'La IA respondió con un formato inesperado, se generaron actividades básicas.',
-        { error: 'JSON inválido desde OpenAI' }
+        { error: 'JSON inválido desde Gemini' }
       );
     }
 
-    const content = data?.choices?.[0]?.message?.content?.trim();
+    const content = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
     if (!content) {
-      console.error('Respuesta vacía de OpenAI:', data);
+      console.error('❌ Respuesta vacía de Gemini:', data);
       return responderModoSimple(
         'La IA no devolvió contenido válido, se generaron actividades básicas.',
-        { error: 'Respuesta vacía de OpenAI' }
+        { error: 'Respuesta vacía de Gemini' }
       );
     }
 
-    // 💡 Intentar extraer JSON del contenido devuelto por OpenAI
-    let generatedText = '';
-    generatedText = content;
+    // 💡 Intentar extraer JSON del contenido devuelto por Gemini
+    let generatedText = content
+      .replace(/```json/gi, '')
+      .replace(/```/g, '')
+      .trim();
 
-    // 🧹 Intentar parsear JSON del texto generado
     let actividades;
     try {
-      // Buscar JSON en el texto generado
-      const jsonMatch = generatedText.match(/\[[\s\S]*\]/);
-      if (jsonMatch) {
-        actividades = JSON.parse(jsonMatch[0]);
+      // Detectar JSON tipo {} o []
+      const jsonMatch = generatedText.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+
+      if (!jsonMatch) throw new Error("No se detectó JSON");
+
+      let parsed = JSON.parse(jsonMatch[0]);
+
+      // Gemini a veces devuelve { actividades: [...] }
+      if (parsed.actividades) {
+        actividades = parsed.actividades;
       } else {
-        // Si no hay JSON, crear actividades desde el texto
-        const lines = generatedText.split('\n').filter(line => line.trim());
-        actividades = lines.slice(0, 3).map((line, index) => ({
-          titulo: `Actividad ${index + 1}`,
-          descripcion: line.trim(),
-          nivel: 'medio'
-        }));
+        actividades = Array.isArray(parsed) ? parsed : [parsed];
       }
+
+      // Guardar en caché
+      saveToCache(cacheParams, actividades);
+
+      return res.json({
+        actividades,
+        modo: 'IA',
+        nota: 'Actividades generadas con éxito por Gemini',
+        filtros: cacheParams
+      });
+
     } catch (err) {
-      // Si falla el parseo, crear actividades simples
-      console.log('No se pudo parsear JSON, creando actividades simples');
-      actividades = [{
-        titulo: "Actividad generada",
-        descripcion: generatedText.substring(0, 200),
-        nivel: "medio",
-        duracion: duracion ? `${duracion} minutos` : '40 minutos'
-      }];
+      console.warn("⚠️ No se pudo parsear JSON de Gemini, usando fallback");
+      actividades = [
+        {
+          titulo: "Actividad generada",
+          descripcion: generatedText.slice(0, 200),
+          nivel: nivelEducativo,
+          duracion: `${duracionTexto} minutos`
+        }
+      ];
+      
+      return res.json({
+        actividades,
+        modo: 'IA (fallback)',
+        nota: 'Actividades generadas con formato fallback',
+        filtros: cacheParams
+      });
     }
 
-    res.json({ 
-      actividades,
-      modo: 'ia',
-      filtros,
-      modelo: OPENAI_MODEL
-    });
-
   } catch (error) {
-    console.error('Error generando actividades:', error);
+    console.error('❌ Error generando actividades:', error.message);
     return responderModoSimple(
-      'Ocurrió un error interno al usar la IA, se generaron actividades básicas.',
+      'Error interno al generar actividades con IA',
       { error: error.message }
     );
   }
+});
+
+/**
+ * GET /ia/stats
+ * Retorna estadísticas de uso y caché
+ */
+router.get('/stats', (req, res) => {
+  const stats = {
+    cacheSize: activityCache.size,
+    maxCacheSize: 100,
+    cacheTTLMinutes: CACHE_TTL_MS / 60000,
+    retryConfig: {
+      maxRetries: RETRY_CONFIG.maxRetries,
+      initialDelayMs: RETRY_CONFIG.initialDelayMs,
+      backoffMultiplier: RETRY_CONFIG.backoffMultiplier
+    },
+    timestamp: new Date().toISOString(),
+    tips: [
+      'Si tienes errores 429, espera 44-60 segundos antes de reintentar',
+      'Las actividades se cachean por 1 hora para reducir llamadas a la API',
+      'Usa modelos gemini-1.5-flash para menor consumo de tokens',
+      'Verifica tu cuota en: https://ai.google.com/usage'
+    ]
+  };
+
+  res.json(stats);
+});
+
+/**
+ * DELETE /ia/cache
+ * Limpia el caché de actividades
+ */
+router.delete('/cache', (req, res) => {
+  const sizeBefore = activityCache.size;
+  activityCache.clear();
+
+  res.json({
+    message: 'Caché limpiado',
+    itemsCleared: sizeBefore,
+    timestamp: new Date().toISOString()
+  });
 });
 
 export default router;
