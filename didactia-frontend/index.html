@@ -8,6 +8,36 @@
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
+    <!-- Protección contra scripts externos que intenten acceder al DOM antes de tiempo -->
+    <script>
+      // Interceptar y manejar errores de scripts externos de forma silenciosa
+      window.addEventListener('error', function(event) {
+        // Si el error está relacionado con elementos que no existen (tui-image-editor, share-modal, etc.)
+        if (event.message && (
+          event.message.includes('tui-image-editor') ||
+          event.message.includes('share-modal') ||
+          event.message.includes('getElement') ||
+          event.message.includes('querySelector')
+        )) {
+          // Prevenir que el error se propague y se muestre en consola como error crítico
+          event.preventDefault();
+          console.warn('⚠️ Script externo intentó acceder a elemento que no existe:', event.message);
+          return true;
+        }
+      }, true);
+
+      // Interceptar errores no capturados (unhandled promise rejections)
+      window.addEventListener('unhandledrejection', function(event) {
+        if (event.reason && event.reason.message && (
+          event.reason.message.includes('tui-image-editor') ||
+          event.reason.message.includes('share-modal') ||
+          event.reason.message.includes('Cannot read properties of null')
+        )) {
+          event.preventDefault();
+          console.warn('⚠️ Promesa rechazada por script externo:', event.reason.message);
+        }
+      });
+    </script>
+    <script type="module" defer src="/src/main.jsx"></script>
   </body>
 </html>
