@@ -1,7 +1,24 @@
 import express from 'express';
 import 'dotenv/config';
+import { GoogleGenAI } from '@google/genai';
 
 const router = express.Router();
+
+// 🧠 Inicializar el cliente de Gemini una sola vez
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+
+let genAI = null;
+if (GEMINI_API_KEY) {
+  try {
+    genAI = new GoogleGenAI({
+      apiKey: GEMINI_API_KEY,
+    });
+    console.log('✅ Cliente de Gemini inicializado correctamente');
+  } catch (error) {
+    console.error('❌ Error al inicializar cliente de Gemini:', error);
+  }
+}
 
 // 🔄 Configuración de reintentos automáticos
 const RETRY_CONFIG = {
@@ -55,21 +72,41 @@ function saveToCache(params, data) {
 }
 
 /**
- * Realiza reintentos automáticos con exponential backoff
- * Maneja específicamente el error 429 (quota exceeded)
+ * Realiza reintentos automáticos con exponential backoff usando el cliente oficial de GoogleGenAI
+ * Maneja específicamente errores de cuota (429) y errores de conexión
  */
-async function fetchWithRetry(apiUrl, options, retryCount = 0) {
+async function generarContenidoConReintentos(prompt, retryCount = 0) {
+  if (!genAI) {
+    throw new Error('Cliente de Gemini no inicializado. Verifica GEMINI_API_KEY en .env');
+  }
+
   try {
-    const response = await fetch(apiUrl, options);
-    const rawResponse = await response.text();
+    const response = await genAI.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: prompt,
+      config: {
+        generationConfig: {
+          temperature: 0.7,
+          topK: 40,
+          topP: 0.95,
+          maxOutputTokens: 1024
+        }
+      }
+    });
+    
+    const text = response.text;
+    
+    return { text, success: true };
+  } catch (error) {
+    // Verificar si es un error de cuota o rate limit
+    const isQuotaError = error.message?.includes('429') || 
+                        error.message?.includes('quota') ||
+                        error.message?.includes('rate limit') ||
+                        error.status === 429 ||
+                        error.code === 429;
 
-    // Si es éxito, retornar
-    if (response.ok) {
-      return { response, rawResponse };
-    }
-
-    // Si es error 429 y hay reintentos disponibles
-    if (response.status === 429 && retryCount < RETRY_CONFIG.maxRetries) {
+    // Si es error de cuota y hay reintentos disponibles
+    if (isQuotaError && retryCount < RETRY_CONFIG.maxRetries) {
       const delayMs = Math.min(
         RETRY_CONFIG.initialDelayMs * Math.pow(RETRY_CONFIG.backoffMultiplier, retryCount),
         RETRY_CONFIG.maxDelayMs
@@ -80,13 +117,11 @@ async function fetchWithRetry(apiUrl, options, retryCount = 0) {
       // Esperar antes de reintentar
       await new Promise(resolve => setTimeout(resolve, delayMs));
       
-      return fetchWithRetry(apiUrl, options, retryCount + 1);
+      return generarContenidoConReintentos(prompt, retryCount + 1);
     }
 
-    // Si es otro error, retornar el error
-    return { response, rawResponse, error: true };
-  } catch (error) {
-    if (retryCount < RETRY_CONFIG.maxRetries) {
+    // Si es otro error de conexión y hay reintentos disponibles
+    if (!isQuotaError && retryCount < RETRY_CONFIG.maxRetries) {
       const delayMs = Math.min(
         RETRY_CONFIG.initialDelayMs * Math.pow(RETRY_CONFIG.backoffMultiplier, retryCount),
         RETRY_CONFIG.maxDelayMs
@@ -95,9 +130,10 @@ async function fetchWithRetry(apiUrl, options, retryCount = 0) {
       console.warn(`⚠️ Error de conexión. Reintentando en ${delayMs / 1000} segundos... (intento ${retryCount + 1}/${RETRY_CONFIG.maxRetries})`);
       await new Promise(resolve => setTimeout(resolve, delayMs));
       
-      return fetchWithRetry(apiUrl, options, retryCount + 1);
+      return generarContenidoConReintentos(prompt, retryCount + 1);
     }
     
+    // Si se agotaron los reintentos, lanzar el error
     throw error;
   }
 }
@@ -202,11 +238,9 @@ router.post('/generar', async (req, res) => {
   };
 
   try {
-    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-    const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
-    const USE_AI = process.env.USE_AI !== 'false' && GEMINI_API_KEY;
+    const USE_AI = process.env.USE_AI !== 'false' && genAI;
     
-    // Si no hay API key o está deshabilitada, usar generación simple
+    // Si no hay cliente de IA o está deshabilitada, usar generación simple
     if (!USE_AI) {
       console.log('🤖 Generando actividades sin IA (modo simple)');
       return responderModoSimple(
@@ -234,66 +268,32 @@ router.post('/generar', async (req, res) => {
     const tipoDescripcion = tipo || '';
 
     // Prompt compacto para reducir tokens
-    const prompt = `Genera 3 actividades para ${nivelEducativo} en ${materia} sobre "${tema || objetivo}". 
+    const prompt = `Responde con JSON válido únicamente.
+
+Genera 3 actividades para ${nivelEducativo} en ${materia} sobre "${tema || objetivo}". 
 ${modalidadTexto ? `Modalidad: ${modalidadTexto}. ` : ''}${tipoDescripcion ? `Tipo: ${tipoDescripcion}. ` : ''}Duración: ${duracionTexto} min.
+
 Devuelve SOLO JSON:
-[{"titulo":"...","descripcion":"...","nivel":"...","duracion":"..."}]`;
+[{"titulo":"...","descripcion":"...","nivel":"${nivelEducativo}","duracion":"${duracionTexto} minutos"}]`;
 
     console.log('🤖 IA (Gemini) activada: ✅');
     console.log(`📦 Modelo configurado: ${GEMINI_MODEL}`);
     console.log('🔄 Reintentos automáticos: Habilitados (max 3)');
 
-    const systemInstruction = 'Responde con JSON válido únicamente.';
-    const fullPrompt = `${systemInstruction}\n${prompt}`;
-
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
-    
-    // Usar la función con reintentos
-    const { response, rawResponse, error: fetchError } = await fetchWithRetry(apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        contents: [{
-          parts: [{
-            text: fullPrompt
-          }]
-        }],
-        generationConfig: {
-          temperature: 0.7,
-          topK: 40,
-          topP: 0.95,
-          maxOutputTokens: 1024  // Reducido de 2048
-        }
-      })
-    });
-
-    if (fetchError || !response.ok) {
-      console.error('❌ Error desde Gemini después de reintentos:', {
-        status: response?.status,
-        message: rawResponse
-      });
+    // Usar la función con reintentos del cliente oficial
+    let resultado;
+    try {
+      resultado = await generarContenidoConReintentos(prompt);
+    } catch (error) {
+      console.error('❌ Error desde Gemini después de reintentos:', error);
       return responderModoSimple(
         'La IA no está disponible después de reintentos, se generaron actividades básicas.',
-        { status: response?.status, message: rawResponse }
+        { error: error.message || 'Error desconocido' }
       );
     }
 
-    let data;
-    try {
-      data = JSON.parse(rawResponse);
-    } catch (jsonError) {
-      console.error('❌ Error parseando respuesta de Gemini:', rawResponse);
-      return responderModoSimple(
-        'La IA respondió con un formato inesperado, se generaron actividades básicas.',
-        { error: 'JSON inválido desde Gemini' }
-      );
-    }
-
-    const content = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-    if (!content) {
-      console.error('❌ Respuesta vacía de Gemini:', data);
+    if (!resultado.success || !resultado.text) {
+      console.error('❌ Respuesta vacía o inválida de Gemini');
       return responderModoSimple(
         'La IA no devolvió contenido válido, se generaron actividades básicas.',
         { error: 'Respuesta vacía de Gemini' }
@@ -301,7 +301,7 @@ Devuelve SOLO JSON:
     }
 
     // 💡 Intentar extraer JSON del contenido devuelto por Gemini
-    let generatedText = content
+    let generatedText = resultado.text
       .replace(/```json/gi, '')
       .replace(/```/g, '')
       .trim();
@@ -378,7 +378,7 @@ router.get('/stats', (req, res) => {
     tips: [
       'Si tienes errores 429, espera 44-60 segundos antes de reintentar',
       'Las actividades se cachean por 1 hora para reducir llamadas a la API',
-      'Usa modelos gemini-1.5-flash para menor consumo de tokens',
+      `Modelo configurado: ${GEMINI_MODEL}`,
       'Verifica tu cuota en: https://ai.google.com/usage'
     ]
   };
